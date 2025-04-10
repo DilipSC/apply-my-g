@@ -380,19 +380,113 @@ class InternshalaBot:
             # Wait for form to load completely
             self._wait_for_page_load()
             
-            # Handle any popups that might appear
+            # Handle any popups
             self._handle_popups()
             
-            # First handle any visible cover letter field
+            # First handle the cover letter field with specific structure
             try:
-                cover_letter_field = self.driver.find_element(By.CSS_SELECTOR, "textarea[placeholder*='Mention in detail what relevant skill']")
-                if cover_letter_field.is_displayed():
-                    self._scroll_into_view(cover_letter_field)
-                    cover_letter = self._generate_cover_letter_for_role()
-                    self._human_like_typing(cover_letter_field, cover_letter)
-                    print("Filled cover letter field")
+                # Try to find the cover letter container
+                cover_letter_container = self.driver.find_element(By.CSS_SELECTOR, ".cover_letter_container.application_modal")
+                if cover_letter_container.is_displayed():
+                    # Try to find the textarea
+                    try:
+                        textarea = cover_letter_container.find_element(By.ID, "cover_letter")
+                        if textarea.is_displayed():
+                            self._scroll_into_view(textarea)
+                            response = self._generate_cover_letter_for_role()
+                            self._human_like_typing(textarea, response)
+                            print("Filled cover letter field")
+                    except:
+                        # If textarea not found, try the rich text editor
+                        try:
+                            rich_editor = cover_letter_container.find_element(By.CSS_SELECTOR, ".ql-editor")
+                            if rich_editor.is_displayed():
+                                self._scroll_into_view(rich_editor)
+                                response = self._generate_cover_letter_for_role()
+                                # For rich text editor, we need to use JavaScript to set the content
+                                self.driver.execute_script("arguments[0].innerHTML = arguments[1];", rich_editor, f"<p>{response}</p>")
+                                print("Filled cover letter rich text editor")
+                        except:
+                            print("Could not find textarea or rich text editor in cover letter container")
             except Exception as e:
-                print(f"Cover letter field not found or couldn't be filled: {e}")
+                print(f"Error handling cover letter field: {e}")
+            
+            # Handle the common "Why should you be hired" field with specific structure
+            try:
+                # Try to find the field using the specific structure
+                assessment_question = self.driver.find_element(By.XPATH, "//div[contains(@class, 'assessment_question')]//label[contains(text(), 'Why should you be hired')]")
+                if assessment_question.is_displayed():
+                    # Find the associated textarea
+                    try:
+                        # First try to find the textarea directly
+                        textarea = self.driver.find_element(By.ID, "cover_letter")
+                        if textarea.is_displayed():
+                            self._scroll_into_view(textarea)
+                            response = self._generate_cover_letter_for_role()
+                            self._human_like_typing(textarea, response)
+                            print("Filled 'Why should you be hired' field")
+                    except:
+                        # If direct textarea not found, try the rich text editor
+                        try:
+                            rich_editor = self.driver.find_element(By.CSS_SELECTOR, ".ql-editor")
+                            if rich_editor.is_displayed():
+                                self._scroll_into_view(rich_editor)
+                                response = self._generate_cover_letter_for_role()
+                                # For rich text editor, we need to use JavaScript to set the content
+                                self.driver.execute_script("arguments[0].innerHTML = arguments[1];", rich_editor, f"<p>{response}</p>")
+                                print("Filled 'Why should you be hired' rich text editor")
+                        except:
+                            print("Could not find textarea or rich text editor for 'Why should you be hired' field")
+            except Exception as e:
+                print(f"Error handling 'Why should you be hired' field: {e}")
+            
+            # Handle other cover letter or "Why should you be hired" fields using various selectors
+            try:
+                textarea_selectors = [
+                    "textarea[placeholder*='Mention in detail what relevant skill']",
+                    "textarea[placeholder*='Why should you be hired']",
+                    "textarea[placeholder*='Cover letter']",
+                    "textarea[placeholder*='Tell us why you should be hired']",
+                    "textarea[placeholder*='Why should we hire you']"
+                ]
+                
+                for selector in textarea_selectors:
+                    try:
+                        textarea = self.driver.find_element(By.CSS_SELECTOR, selector)
+                        if textarea.is_displayed() and textarea.get_attribute("value") == "":
+                            self._scroll_into_view(textarea)
+                            response = self._generate_cover_letter_for_role()
+                            self._human_like_typing(textarea, response)
+                            print("Filled cover letter/Why should you be hired field")
+                            break
+                    except:
+                        continue
+                
+                # Also try to find by label text
+                try:
+                    textareas = self.driver.find_elements(By.TAG_NAME, "textarea")
+                    for textarea in textareas:
+                        try:
+                            # Try to find associated label
+                            field_id = textarea.get_attribute("id")
+                            if field_id:
+                                label = self.driver.find_element(By.CSS_SELECTOR, f"label[for='{field_id}']")
+                                label_text = label.text.strip().lower()
+                                
+                                if any(keyword in label_text for keyword in ["cover letter", "why should you be hired", "why hire you", "why should we hire you"]):
+                                    if textarea.is_displayed() and textarea.get_attribute("value") == "":
+                                        self._scroll_into_view(textarea)
+                                        response = self._generate_cover_letter_for_role()
+                                        self._human_like_typing(textarea, response)
+                                        print(f"Filled field with label: {label_text}")
+                                        break
+                        except:
+                            continue
+                except:
+                    pass
+                    
+            except Exception as e:
+                print(f"Error handling cover letter field: {e}")
             
             # Handle radio buttons for availability
             try:
@@ -419,16 +513,36 @@ class InternshalaBot:
                 try:
                     if field.is_displayed() and field.get_attribute("value") == "":
                         self._scroll_into_view(field)
-                        placeholder = field.get_attribute("placeholder") or ""
                         
                         # Skip if it's a file upload field
                         if field.get_attribute("type") == "file":
                             continue
+                        
+                        # Try to find the associated label
+                        label_text = ""
+                        try:
+                            # Try to find label using for attribute
+                            field_id = field.get_attribute("id")
+                            if field_id:
+                                label = self.driver.find_element(By.CSS_SELECTOR, f"label[for='{field_id}']")
+                                label_text = label.text.strip()
                             
-                        # Generate appropriate response based on field placeholder or label
-                        response = self._get_appropriate_field_response(placeholder)
+                            # If no label found with for attribute, try to find nearby label
+                            if not label_text:
+                                label = field.find_element(By.XPATH, "./ancestor::div[contains(@class, 'form-group') or contains(@class, 'custom-question')]//label")
+                                label_text = label.text.strip()
+                        except:
+                            # If no label found, try to get placeholder as fallback
+                            label_text = field.get_attribute("placeholder") or ""
+                        
+                        # Skip if this is a cover letter or "Why should you be hired" field (already handled)
+                        if any(keyword in label_text.lower() for keyword in ["cover letter", "why should you be hired", "why hire you", "why should we hire you"]):
+                            continue
+                        
+                        # Generate appropriate response based on label text
+                        response = self._get_appropriate_field_response(label_text)
                         self._human_like_typing(field, response)
-                        print(f"Filled field with placeholder: {placeholder}")
+                        print(f"Filled field with label: {label_text}")
                         time.sleep(0.5)
                 except Exception as e:
                     print(f"Error filling field: {e}")
@@ -440,14 +554,26 @@ class InternshalaBot:
                 try:
                     if question_field.is_displayed() and question_field.get_attribute("value") == "":
                         self._scroll_into_view(question_field)
-                        # Try to find the question text
+                        
+                        # Try to find the question text from label
                         question_text = ""
                         try:
-                            # Try to find the closest label or question text
-                            question_element = question_field.find_element(By.XPATH, "./ancestor::div[contains(@class, 'form-group') or contains(@class, 'custom-question')]//label")
-                            question_text = question_element.text
+                            # Try to find label using for attribute
+                            field_id = question_field.get_attribute("id")
+                            if field_id:
+                                label = self.driver.find_element(By.CSS_SELECTOR, f"label[for='{field_id}']")
+                                question_text = label.text.strip()
+                            
+                            # If no label found with for attribute, try to find nearby label
+                            if not question_text:
+                                label = question_field.find_element(By.XPATH, "./ancestor::div[contains(@class, 'form-group') or contains(@class, 'custom-question')]//label")
+                                question_text = label.text.strip()
                         except:
                             question_text = "Custom question"
+                        
+                        # Skip if this is a cover letter or "Why should you be hired" field (already handled)
+                        if any(keyword in question_text.lower() for keyword in ["cover letter", "why should you be hired", "why hire you", "why should we hire you"]):
+                            continue
                         
                         # Generate answer based on question
                         answer = self._generate_answer_for_question(question_text)
@@ -596,6 +722,9 @@ class InternshalaBot:
             - Eager to learn and contribute
             - Available to start immediately
             - Passionate about machine learning and AI
+            - Has experience with data preprocessing and annotation
+            - Familiar with various computer vision techniques
+            - Has worked on multiple projects involving image processing
             
             The answer should be:
             1. 3-5 sentences long
@@ -603,6 +732,11 @@ class InternshalaBot:
             3. Highlight relevant skills and experiences
             4. Professional but enthusiastic
             5. Demonstrate genuine interest in the role
+            6. Include specific examples where possible
+            7. Show how the skills match the job requirements
+            8. Express willingness to learn and contribute
+            
+            Don't use generic responses. Make it specific to computer vision and data annotation roles.
             """
             
             try:
@@ -622,13 +756,13 @@ class InternshalaBot:
                     return "I'm particularly drawn to this opportunity because it perfectly aligns with my technical skills and career interests in computer vision and machine learning. My background in Python programming, experience with OpenCV, and familiarity with Linux environments have prepared me well for the responsibilities outlined in the job description. I'm excited about the prospect of contributing to meaningful projects while learning from experienced professionals in the field."
         except Exception as e:
             print(f"Error generating answer: {e}")
-            return "I believe my technical skills and enthusiasm make me a strong candidate for this role. I'm available to start immediately and eager to contribute to your team."
+            return "I believe my technical skills in Python and experience with data annotation projects make me well-suited for this position. I'm passionate about computer vision and eager to contribute to your team while continuing to develop my skills in this exciting field. I'm available to start immediately and committed to delivering high-quality work."
 
     def _get_appropriate_field_response(self, placeholder):
         """Return appropriate response based on field placeholder or label"""
         placeholder_lower = placeholder.lower()
         
-        # Common fields
+        # Common fields with specific responses
         if "name" in placeholder_lower:
             return "Dilip S Chakravarthi"
         elif "email" in placeholder_lower:
@@ -649,11 +783,41 @@ class InternshalaBot:
             return "2023"
         elif "location" in placeholder_lower or "address" in placeholder_lower:
             return "Bangalore, Karnataka"
-        elif any(word in placeholder_lower for word in ["cover letter", "why", "hired", "skill", "experience", "excite"]):
+        elif "cover letter" in placeholder_lower:
             return self._generate_cover_letter_for_role()
+        elif "why" in placeholder_lower and "hire" in placeholder_lower:
+            return "My strong technical background in Python and experience with computer vision projects make me an ideal candidate for this role. I have hands-on experience with data annotation and preprocessing, which directly aligns with the key responsibilities. I'm passionate about computer vision applications and eager to contribute to your team while continuing to learn and grow in this specialized field."
+        elif "weakness" in placeholder_lower:
+            return "My perfectionism can sometimes lead me to spend extra time refining projects, though I've learned to balance this with meeting deadlines by setting clear milestones. I actively seek feedback to improve and have developed effective time management strategies to ensure high-quality deliverables without unnecessary delays."
+        elif "strength" in placeholder_lower:
+            return "My key strength is my ability to quickly learn new technologies and apply them to solve real-world problems. This has enabled me to develop proficiency in Python, OpenCV, and Linux environments. Additionally, I'm highly detail-oriented, which is particularly valuable for data annotation and preparation tasks that require precision and consistency."
+        elif "experience" in placeholder_lower:
+            return "I've worked on several computer vision projects where I developed Python scripts for data collection, preprocessing, and annotation. In one project, I created a custom annotation tool that increased labeling efficiency by 30%. I also have experience converting between various annotation formats and integrating preprocessed data into machine learning pipelines."
+        elif "skill" in placeholder_lower:
+            return "Python, OpenCV, Linux, Data Annotation, Machine Learning, Computer Vision, Data Preprocessing, Image Processing, Object Detection, Deep Learning"
+        elif "project" in placeholder_lower:
+            return "Developed a custom annotation tool for computer vision datasets that improved labeling efficiency by 30%. Created Python scripts for automated data collection and preprocessing. Implemented various image processing algorithms using OpenCV for data enhancement."
+        elif "interest" in placeholder_lower or "passion" in placeholder_lower:
+            return "I'm particularly passionate about computer vision and machine learning applications. I enjoy working on projects that involve data annotation, preprocessing, and model training. The opportunity to work on real-world computer vision problems while learning from experienced professionals excites me."
+        elif "availability" in placeholder_lower or "start date" in placeholder_lower:
+            return "I am available to start immediately and can commit to the full duration of the internship. I'm flexible with working hours and can adapt to the team's schedule."
+        elif "salary" in placeholder_lower or "stipend" in placeholder_lower or "expectation" in placeholder_lower:
+            return "I'm flexible with the stipend and more interested in the learning opportunity and experience this internship provides. I'm open to discussing a stipend that aligns with the company's standards and the value I can bring to the team."
+        elif "reference" in placeholder_lower:
+            return "Available upon request"
+        elif "resume" in placeholder_lower or "cv" in placeholder_lower:
+            return "I have attached my resume which details my technical skills, projects, and experience in computer vision and machine learning."
+        elif "certification" in placeholder_lower:
+            return "Python Programming Certification, Machine Learning Fundamentals, Computer Vision Basics"
+        elif "language" in placeholder_lower:
+            return "English (Fluent), Kannada (Native)"
+        elif "achievement" in placeholder_lower:
+            return "Developed a custom annotation tool that improved labeling efficiency by 30%. Created multiple computer vision projects that demonstrate my technical skills. Consistently maintained high academic performance throughout my education."
+        elif "hobby" in placeholder_lower or "interest" in placeholder_lower:
+            return "I enjoy working on personal computer vision projects, contributing to open-source projects, and staying updated with the latest developments in AI and machine learning. I also participate in coding competitions and hackathons."
         else:
-            # For fields we can't easily identify
-            return "I believe my technical skills and enthusiasm make me a strong candidate for this role. I'm available to start immediately and eager to contribute to your team."
+            # For fields we can't easily identify, use Gemini AI to generate a response
+            return self._generate_answer_for_question(placeholder)
 
     def _human_like_typing(self, element, text):
         """Type text in a human-like manner"""
